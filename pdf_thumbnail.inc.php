@@ -45,6 +45,29 @@ function url_to_base64($url)
     return $base64;
 }
 
+function url_to_png($url, $png)
+{
+    $imagick = new Imagick();
+    $imagick->setResolution(PLUGIN_PDF_THUMBNAIL_RESOLUTION, PLUGIN_PDF_THUMBNAIL_RESOLUTION);
+    $imagick->readImage($url);
+    $imagick->setIteratorIndex(0);
+    $imagick->setImageBackgroundColor('#ffffff');
+    $imagick->setImageAlphaChannel(Imagick::ALPHACHANNEL_REMOVE);
+    $imagick->mergeImageLayers(Imagick::LAYERMETHOD_FLATTEN);
+    $imagick->setImageFormat('png');
+    $imagick->writeImage($png);
+}
+
+function create_htaccess()
+{
+    $htaccess = <<<EOF
+<Files ~ "\.png$">
+  Require all granted
+</Files>
+EOF;
+    file_put_contents(PLUGIN_PDF_THUMBNAIL_CACHEDIR . '.htaccess', $htaccess);
+}
+
 function plugin_pdf_thumbnail_convert()
 {
     global $vars;
@@ -96,33 +119,7 @@ function plugin_pdf_thumbnail_convert()
         $anchor_link = $url;
     }
 
-    // use cache for attachments
-    if ($is_attachment) {
-        // create cache dir if it does not exist
-        if (!file_exists(PLUGIN_PDF_THUMBNAIL_CACHEDIR) && PLUGIN_PDF_THUMBNAIL_CACHE) {
-            mkdir(PLUGIN_PDF_THUMBNAIL_CACHEDIR);
-        }
-
-        $cache_file = PLUGIN_PDF_THUMBNAIL_CACHEDIR . md5($file_path . '_' . PLUGIN_PDF_THUMBNAIL_RESOLUTION);
-        // check if cache was generated after the attachment was uploaded
-        if (file_exists($cache_file) && (filemtime($cache_file) > filemtime($file_path)) && PLUGIN_PDF_THUMBNAIL_CACHE) {
-            $base64 = file_get_contents($cache_file);
-        } else {
-            // create base64 and save as cache
-            if (!extension_loaded('imagick')) {
-                return 'Imagick not installed';
-            }
-            try {
-                $base64 = url_to_base64($url);
-            } catch (Exception $e) {
-                return $e->getMessage();
-            }
-            // save cache
-            if (PLUGIN_PDF_THUMBNAIL_CACHE) {
-                file_put_contents($cache_file, $base64, LOCK_EX);
-            }
-        }
-    } else {
+    if (!PLUGIN_PDF_THUMBNAIL_CACHE) {
         if (!extension_loaded('imagick')) {
             return 'Imagick not installed';
         }
@@ -131,7 +128,33 @@ function plugin_pdf_thumbnail_convert()
         } catch (Exception $e) {
             return $e->getMessage();
         }
+        return '<a href="' . $anchor_link . '" target="' . PLUGIN_PDF_THUMBNAIL_ANCHOR_TARGET . '"><img src="data:image/png;base64,' . $base64 . '" style="' . PLUGIN_PDF_THUMBNAIL_STYLE . '"></a>';
     }
 
-    return '<a href="' . $anchor_link . '" target="' . PLUGIN_PDF_THUMBNAIL_ANCHOR_TARGET . '"><img src="data:image/png;base64,' . $base64 . '" style="' . PLUGIN_PDF_THUMBNAIL_STYLE . '"></a>';
+    create_htaccess();
+
+    // create cache dir if it does not exist
+    if (!file_exists(PLUGIN_PDF_THUMBNAIL_CACHEDIR)) {
+        mkdir(PLUGIN_PDF_THUMBNAIL_CACHEDIR);
+    }
+
+    $cache_file = PLUGIN_PDF_THUMBNAIL_CACHEDIR . md5($file_path . '_' . PLUGIN_PDF_THUMBNAIL_RESOLUTION) . '.png';
+    // check if cache was generated after the attachment was uploaded
+    if (file_exists($cache_file) && (filemtime($cache_file) > filemtime($file_path)) && $is_attachment) {
+        // $base64 = file_get_contents($cache_file);
+        return '<a href="' . $anchor_link . '" target="' . PLUGIN_PDF_THUMBNAIL_ANCHOR_TARGET . '"><img src="' . $cache_file . '" style="' . PLUGIN_PDF_THUMBNAIL_STYLE . '"></a>';
+    } else {
+        // create base64 and save as cache
+        if (!extension_loaded('imagick')) {
+            return 'Imagick not installed';
+        }
+        // create cache
+        try {
+            url_to_png($url, $cache_file);
+        } catch (Exception $e) {
+            return $e->getMessage();
+        }
+    }
+
+    return '<a href="' . $anchor_link . '" target="' . PLUGIN_PDF_THUMBNAIL_ANCHOR_TARGET . '"><img src="' . $cache_file . '" style="' . PLUGIN_PDF_THUMBNAIL_STYLE . '"></a>';
 }
